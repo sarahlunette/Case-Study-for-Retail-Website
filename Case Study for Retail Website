@@ -1,0 +1,417 @@
+#!/usr/bin/env python
+# coding: utf-8
+
+# In[2]:
+
+
+import os
+import csv
+import pandas as pd
+import matplotlib.pyplot as plt
+import scipy as sp
+import numpy as np
+import datetime
+import sklearn
+import psycopg2 as db_connect
+
+
+# In[3]:
+
+
+An = pd.read_csv('/Users/sarahlenet/Documents/Candidatures Postes/an/Case Product Analyst/data_case_an-Tableau 1.csv', sep = ';')
+
+
+# In[4]:
+
+
+an
+
+
+# # Percent orders with discounts, Percent retailers with discounts, one-time retailers, one-time retailres with discounts
+
+# In[5]:
+
+
+an.fees_percentage.unique()
+
+
+# In[106]:
+
+
+percent_discounts = len(an['has_discount'][an.has_discount == 100].to_list())/len(an['has_discount'].to_list())*100
+percent_discounts
+
+
+# In[109]:
+
+
+n_retailers = len(an['retailer_id'].unique())
+n_retailers_discount = len(an['retailer_id'][an.has_discount == 100].unique())
+percent_retailer_discount = n_retailers_discount/n_retailers*100
+percent_retailer_discount
+
+
+# In[112]:
+
+
+n_orders_retailers = an.groupby('retailer_id').count()
+
+
+# In[122]:
+
+
+one_time_retailers = n_orders_retailers[n_orders_retailers['order_id'] == 1].index
+one_time_retailers = one_time_retailers.to_list()
+one_time_retailers
+
+
+# In[124]:
+
+
+one_time_retailers_ = an[an['retailer_id'].isin(one_time_retailers)]
+n_retailer_id_onetime_discount = len(one_time_retailers_[one_time_retailers_['has_discount'] == 100]['retailer_id'].unique())
+
+
+# In[127]:
+
+
+n_retailer_id_onetime_discount/3334*100
+
+
+# In[117]:
+
+
+len(one_time_retailers)
+
+
+# # Engineering
+
+# In[6]:
+
+
+a = []
+for column in an.columns:
+    print(type(an[column][0]))
+    if type(an[column][0]).__name__ == 'str':
+        a.append(column)
+
+
+# In[7]:
+
+
+a
+
+
+# In[8]:
+
+
+def convert_to_float(df, column):
+    df[column] = df[column].apply(lambda x: x.replace(',','.'))
+    df[column] = df[column].astype(float)
+
+
+# In[9]:
+
+
+for column in a:
+    convert_to_float(an, column)
+
+
+# In[10]:
+
+
+path_csv = '/Users/sarahlenet/Documents/Candidatures Postes/an/Case Product Analyst/data_case_an-Tableau 1.csv'
+path = '/Users/sarahlenet/Documents/Candidatures Postes/an/Case Product Analyst/'
+
+
+# In[11]:
+
+
+an.to_csv(path + 'Case.csv')
+
+
+# In[12]:
+
+
+an = pd.read_csv(path + 'Case.csv')
+
+
+# In[111]:
+
+
+connection = db_connect.connect(
+    host='localhost',
+    dbname='postgres',
+    user='postgres')
+cursor = connection.cursor()
+
+
+# In[ ]:
+
+
+cursor.execute("""CREATE TABLE an (
+    index integer,
+    order_id integer PRIMARY KEY,
+    checkout_id integer,
+    brand_id integer,
+    retailer_id integer,
+    order_amount float,
+    has_discount integer,
+    fees_percentage float,
+    payment_cost_percentage float,
+    shipping_cost_euro float)""")
+
+with open(path + 'Case.csv', 'r') as f:
+    reader = csv.reader(f)
+    next(reader) # Skip the header row.
+    for row in reader:
+        cursor.execute(
+        "INSERT INTO an VALUES (%s, %s, %s, %s)",
+        row
+    )
+connection.commit()
+
+Note : je peux avoir des retailers qui ont fait plusieurs commandes dont une qui ait utilisé le voucher
+1 - sur la somme des order_amounts tu regardes le pourcentage de order_amounts où le voucher a été utilisé
+Ca peut être intéressant de regarder la share ou moyenne de share pour chaque retailer ou part cohort de retailer en fonction de la GMS
+# In[ ]:
+
+
+query_question1_GMS = 'DECLARE @GMS AS INTEGERDECLARE @Revenue AS INTEGERDECLARE @GrossMargin AS INTEGER
+SELECT SUM(order_amount) AS total_order_amountFROM an
+SELECT SUM(order_amount) AS total_order_amount_with_discountFROM anWHERE (has_discount == 100)
+SET @GMS = total_order_amount_with_discount/total_order_amount*100
+SELECT SUM(order_amount*fees_percentage) AS revenueFROM an
+SELECT SUM(order_amount*fees_percentage) AS revenue_with_discountFROM anWHERE (has_discount == 100)
+SET @Revenue = revenue_with_discount/revenue*100
+SELECT SUM(order_amount*fees_percentage - payment_cost_percentage*order_amount - shipping_cost_euro) as gross_marginFROM an
+SELECT SUM(order_amount*fees_percentage - payment_cost_percentage*order_amount - shipping_cost_euro) as gross_margin_with_discountFROM anWHERE (has_discount == 100)
+SET @GrossMargin = gross_margin_with_discount/gross_margin*100
+print @GMSprint @Revenueprint @GrossMargin'
+
+
+# In[ ]:
+
+
+df = pd.read_sql_query(query, con=connection)
+
+
+# In[13]:
+
+
+an['Revenue'] = an['order_amount']*an['fees_percentage']
+an['Gross Margin'] = an['Revenue'] - an['payment_cost_percentage']*an['order_amount']-an['shipping_cost_euro']
+an['Net Margin'] = an['Gross Margin'] -  an['has_discount']
+
+
+# In[14]:
+
+
+an.drop(['Unnamed: 0'], axis = 1, inplace = True)
+
+
+# In[15]:
+
+
+an
+
+
+# # Metrics
+
+# In[16]:
+
+
+GMS = an.order_amount.sum()
+Revenue = an.Revenue.sum()
+Gross_margin = an['Gross Margin'].sum()
+Net_margin = an['Net Margin'].sum()
+Shipping = an.shipping_cost_euro.sum()
+
+
+# In[17]:
+
+
+Revenue_GMS_percent = Revenue/GMS*100
+
+
+# In[18]:
+
+
+Revenue_GMS_percent
+
+
+# In[19]:
+
+
+#Assume free shipping for all#
+Revenue_GMS_freeshipping_percent = (Revenue-Shipping)/GMS*100
+Revenue_GMS_freeshipping_percent
+
+
+# In[20]:
+
+
+Revenue_shipping_percent = Shipping/Revenue*100
+
+
+# In[21]:
+
+
+Revenue_shipping_percent
+
+
+# In[22]:
+
+
+Gross_margin
+
+
+# In[23]:
+
+
+Net_margin
+
+
+# In[24]:
+
+
+GMS + Shipping
+
+
+# In[25]:
+
+
+insurance_payment = (an['payment_cost_percentage']*an['order_amount']).sum()
+
+
+# In[26]:
+
+
+insurance_payment
+
+
+# In[27]:
+
+
+an['percentage_shipping'] = an['shipping_cost_euro']/an['order_amount']*100
+
+
+# In[28]:
+
+
+an.head(10)
+
+
+# In[ ]:
+
+
+#Looking at the data, there are no specifics in percentage_shipping linked to the value of order_amount
+
+
+# In[29]:
+
+
+an.sort_values('retailer_id').head(15)
+
+
+# In[80]:
+
+
+#Imagine 20% of order is upgraded to products 20% more expensive
+Primary_Loss = 0.20*GMS*0.20 #shipping and insurance cost equals
+Following_Gain_All = GMS*0.15*1.20
+Following_Gain_50 = GMS*0.15 + GMS*0.5*0.20*0.15
+Following_Gain_10 = GMS*0.15 + GMS*0.1*0.20*0.15
+
+
+# In[81]:
+
+
+Following_Gain_All
+
+
+# In[82]:
+
+
+Following_Gain_50
+
+
+# In[83]:
+
+
+Following_Gain_10
+
+
+# In[84]:
+
+
+Primary_Loss
+
+
+# In[85]:
+
+
+percent_gain_revenue_All = (Following_Gain_All - Primary_Loss - GMS*0.15)/(0.15*GMS)
+print(percent_gain_revenue_All)
+percent_gain_revenue_All_lt = (Following_Gain_All - GMS*0.15)/(0.15*GMS)
+print(percent_gain_revenue_All_lt)
+
+
+# In[86]:
+
+
+percent_gain_revenue_50 = (Following_Gain_50 - Primary_Loss - GMS*0.15)/(0.15*GMS)
+print(percent_gain_revenue_50)
+percent_gain_revenue_50_lt = (Following_Gain_50 - GMS*0.15)/(0.15*GMS)
+print(percent_gain_revenue_50_lt)
+
+
+# In[87]:
+
+
+percent_gain_revenue_10 = (Following_Gain_10 - Primary_Loss - GMS*0.15)/(0.15*GMS)
+print(percent_gain_revenue_10)
+percent_gain_revenue_10_lt = (Following_Gain_10 - GMS*0.15)/(0.15*GMS)
+print(percent_gain_revenue_10_lt)
+
+
+# # Metrics with upgraded comission
+
+# In[129]:
+
+
+an_15 = an.copy()
+an_15['fees_percentage'] = 0.15
+
+
+# In[131]:
+
+
+an_15['Revenue'] = an_15['order_amount']*an_15['fees_percentage']
+an_15['Gross Margin'] = an_15['Revenue'] - an_15['payment_cost_percentage']*an_15['order_amount']-an_15['shipping_cost_euro']
+an_15['Net Margin'] = an_15['Gross Margin'] -  an_15['has_discount']
+
+
+# In[135]:
+
+
+GMS = an_15.order_amount.sum()
+Revenue = an_15.Revenue.sum()
+Gross_margin = an_15['Gross Margin'].sum()
+Net_margin = an_15['Net Margin'].sum()
+Shipping = an_15.shipping_cost_euro.sum()
+Revenue_GMS_percent = Revenue/GMS*100
+Revenue_GMS_freeshipping_percent = (Revenue-Shipping)/GMS*100
+
+
+# In[136]:
+
+
+Revenue_GMS_percent
+
+
+# In[137]:
+
+
+Revenue_GMS_freeshipping_percent
+
